@@ -3,46 +3,70 @@ let allData = [];
 let trafficChart = null;
 let currentPeriod = 'hour';
 
-// Generate sample data with more realistic patterns
-function generateSampleData() {
-    const classes = ['car', 'motorcycle', 'person', 'bus', 'truck', 'bicycle'];
-    const weights = [0.4, 0.3, 0.15, 0.05, 0.06, 0.04]; // Realistic distribution
-    const sampleData = [];
-    
-    for (let i = 0; i < 500; i++) {
-        const now = new Date();
-        const randomHoursAgo = Math.floor(Math.random() * 168); // Last week
-        const createdAt = new Date(now.getTime() - (randomHoursAgo * 60 * 60 * 1000));
+// Load data from API
+async function loadData() {
+    try {
+        document.getElementById('loadingIndicator').style.display = 'block';
+        document.getElementById('dataTable').style.display = 'none';
+        document.getElementById('errorMessage').style.display = 'none';
+
+        const dateFilter = document.getElementById('dateFilter').value;
+        const classFilter = document.getElementById('classFilter').value;
+        const limitFilter = document.getElementById('limitFilter').value;
+
+        let url = '/api/data?';
+        const params = new URLSearchParams();
         
-        // Create traffic patterns (more during day hours)
-        const hour = createdAt.getHours();
-        const dayMultiplier = (hour >= 6 && hour <= 22) ? 3 : 0.5;
-        const rushHourMultiplier = (hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 19) ? 2 : 1;
+        if (dateFilter) params.append('date', dateFilter);
+        if (classFilter) params.append('class', classFilter);
+        if (limitFilter) params.append('limit', limitFilter);
+
+        const response = await fetch(url + params.toString());
         
-        const shouldInclude = Math.random() < (0.3 * dayMultiplier * rushHourMultiplier);
-        if (!shouldInclude && i < 400) continue; // Skip some to create realistic patterns
-        
-        // Weighted random selection for vehicle type
-        let random = Math.random();
-        let selectedClass = classes[0];
-        let cumulativeWeight = 0;
-        
-        for (let j = 0; j < classes.length; j++) {
-            cumulativeWeight += weights[j];
-            if (random <= cumulativeWeight) {
-                selectedClass = classes[j];
-                break;
-            }
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        sampleData.push({
-            track_id: Math.floor(Math.random() * 50000),
-            class: selectedClass,
-            created_at: createdAt.toISOString()
-        });
+        const data = await response.json();
+        
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        allData = data;
+        updateStatistics(data);
+        createTrafficChart(data, currentPeriod);
+        populateTable(data);
+        
+        document.getElementById('loadingIndicator').style.display = 'none';
+        document.getElementById('dataTable').style.display = 'table';
+
+    } catch (error) {
+        console.error('Error loading data:', error);
+        document.getElementById('loadingIndicator').style.display = 'none';
+        document.getElementById('errorMessage').textContent = 'Failed to load data: ' + error.message;
+        document.getElementById('errorMessage').style.display = 'block';
     }
-    
-    return sampleData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+}
+
+// Load statistics from API
+async function loadStatistics() {
+    try {
+        const response = await fetch('/api/statistics');
+        const stats = await response.json();
+        
+        if (stats.error) {
+            throw new Error(stats.error);
+        }
+
+        document.getElementById('totalDetections').textContent = stats.total.toLocaleString();
+        document.getElementById('totalCars').textContent = stats.cars.toLocaleString();
+        document.getElementById('totalMotorcycles').textContent = stats.motorcycles.toLocaleString();
+        document.getElementById('avgPerHour').textContent = stats.avg_per_hour.toLocaleString();
+
+    } catch (error) {
+        console.error('Error loading statistics:', error);
+    }
 }
 
 // Format functions
@@ -55,14 +79,22 @@ function formatDate(dateString) {
 }
 
 function formatTime(dateString) {
-    return new Date(dateString).toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
+    return new Date(dateString).toLocaleTimeString('en-US', {
+        hour: '2-digit',
         minute: '2-digit'
     });
 }
 
 function getClassBadge(className) {
-    return `<span class="class-badge class-${className}">${className}</span>`;
+    const badges = {
+        'car': '<span class="badge badge-car">🚗 Car</span>',
+        'motorcycle': '<span class="badge badge-motorcycle">🏍️ Motorcycle</span>',
+        'person': '<span class="badge badge-person">🚶 Person</span>',
+        'bus': '<span class="badge badge-bus">🚌 Bus</span>',
+        'truck': '<span class="badge badge-truck">🚚 Truck</span>',
+        'bicycle': '<span class="badge badge-bicycle">🚲 Bicycle</span>'
+    };
+    return badges[className] || `<span class="badge">${className}</span>`;
 }
 
 // Update statistics
@@ -70,12 +102,6 @@ function updateStatistics(data) {
     const total = data.length;
     const cars = data.filter(d => d.class === 'car').length;
     const motorcycles = data.filter(d => d.class === 'motorcycle').length;
-    const avgPerHour = Math.round(total / 24);
-
-    document.getElementById('totalDetections').textContent = total.toLocaleString();
-    document.getElementById('totalCars').textContent = cars.toLocaleString();
-    document.getElementById('totalMotorcycles').textContent = motorcycles.toLocaleString();
-    document.getElementById('avgPerHour').textContent = avgPerHour.toLocaleString();
 
     // Update analytics panel
     const hourlyCounts = Array(24).fill(0);
@@ -226,6 +252,23 @@ function createTrafficChart(data, period) {
     });
 }
 
+// Populate table with data
+function populateTable(data) {
+    const tbody = document.getElementById('tableBody');
+    tbody.innerHTML = '';
+
+    data.forEach(item => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${item.track_id}</td>
+            <td>${getClassBadge(item.class)}</td>
+            <td>${formatTime(item.created_at)}</td>
+            <td>${formatDate(item.created_at)}</td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
 // Filter data
 function filterData(data) {
     const dateFilter = document.getElementById('dateFilter').value;
@@ -244,4 +287,29 @@ function filterData(data) {
     if (classFilter) {
         filtered = filtered.filter(d => d.class === classFilter);
     }
+
+    return filtered;
 }
+
+// Event listeners
+document.addEventListener('DOMContentLoaded', function() {
+    // Load initial data
+    loadData();
+    loadStatistics();
+
+    // Time filter buttons
+    document.querySelectorAll('.time-filter button').forEach(button => {
+        button.addEventListener('click', function() {
+            document.querySelectorAll('.time-filter button').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            currentPeriod = this.dataset.period;
+            createTrafficChart(allData, currentPeriod);
+        });
+    });
+
+    // Auto refresh every 30 seconds
+    setInterval(() => {
+        loadData();
+        loadStatistics();
+    }, 30000);
+});
