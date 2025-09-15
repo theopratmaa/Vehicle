@@ -6,7 +6,7 @@ import pytz
 class DBLogger:
     def __init__(self):
         self.connection = psycopg2.connect(
-            dbname="vehicle_db",
+            dbname="mydb",
             user="postgres",
             password="123",
             host="localhost",

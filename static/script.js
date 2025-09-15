@@ -3,56 +3,85 @@ let allData = [];
 let trafficChart = null;
 let currentPeriod = 'hour';
 
-// Load data from API
+// Load data from API dengan retry mechanism
 async function loadData() {
+    const maxRetries = 3;
+    let retryCount = 0;
+    
+    while (retryCount < maxRetries) {
+        try {
+            document.getElementById('loadingIndicator').style.display = 'block';
+            document.getElementById('dataTable').style.display = 'none';
+            document.getElementById('errorMessage').style.display = 'none';
+
+            const dateFilter = document.getElementById('dateFilter')?.value || '';
+            const classFilter = document.getElementById('classFilter')?.value || '';
+            const limitFilter = document.getElementById('limitFilter')?.value || '';
+
+            let url = '/api/data?';
+            const params = new URLSearchParams();
+            
+            if (dateFilter) params.append('date', dateFilter);
+            if (classFilter) params.append('class', classFilter);
+            if (limitFilter) params.append('limit', limitFilter);
+
+            const response = await fetch(url + params.toString(), {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                timeout: 10000 // 10 second timeout
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                throw new Error(data.error);
+            }
+
+            allData = data;
+            updateStatistics(data);
+            createTrafficChart(data, currentPeriod);
+            populateTable(data);
+            
+            document.getElementById('loadingIndicator').style.display = 'none';
+            document.getElementById('dataTable').style.display = 'table';
+            
+            // Reset retry count on success
+            retryCount = maxRetries;
+            break;
+
+        } catch (error) {
+            retryCount++;
+            console.error(`Error loading data (attempt ${retryCount}):`, error);
+            
+            if (retryCount >= maxRetries) {
+                document.getElementById('loadingIndicator').style.display = 'none';
+                document.getElementById('errorMessage').textContent = `Failed to load data after ${maxRetries} attempts: ${error.message}`;
+                document.getElementById('errorMessage').style.display = 'block';
+            } else {
+                // Wait before retry
+                await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+            }
+        }
+    }
+}
+
+// Load statistics dengan error handling
+async function loadStatistics() {
     try {
-        document.getElementById('loadingIndicator').style.display = 'block';
-        document.getElementById('dataTable').style.display = 'none';
-        document.getElementById('errorMessage').style.display = 'none';
-
-        const dateFilter = document.getElementById('dateFilter').value;
-        const classFilter = document.getElementById('classFilter').value;
-        const limitFilter = document.getElementById('limitFilter').value;
-
-        let url = '/api/data?';
-        const params = new URLSearchParams();
-        
-        if (dateFilter) params.append('date', dateFilter);
-        if (classFilter) params.append('class', classFilter);
-        if (limitFilter) params.append('limit', limitFilter);
-
-        const response = await fetch(url + params.toString());
+        const response = await fetch('/api/statistics', {
+            timeout: 5000
+        });
         
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        const data = await response.json();
-        
-        if (data.error) {
-            throw new Error(data.error);
-        }
-
-        allData = data;
-        updateStatistics(data);
-        createTrafficChart(data, currentPeriod);
-        populateTable(data);
-        
-        document.getElementById('loadingIndicator').style.display = 'none';
-        document.getElementById('dataTable').style.display = 'table';
-
-    } catch (error) {
-        console.error('Error loading data:', error);
-        document.getElementById('loadingIndicator').style.display = 'none';
-        document.getElementById('errorMessage').textContent = 'Failed to load data: ' + error.message;
-        document.getElementById('errorMessage').style.display = 'block';
-    }
-}
-
-// Load statistics from API
-async function loadStatistics() {
-    try {
-        const response = await fetch('/api/statistics');
         const stats = await response.json();
         
         if (stats.error) {
@@ -66,6 +95,11 @@ async function loadStatistics() {
 
     } catch (error) {
         console.error('Error loading statistics:', error);
+        // Set default values on error
+        document.getElementById('totalDetections').textContent = '0';
+        document.getElementById('totalCars').textContent = '0';
+        document.getElementById('totalMotorcycles').textContent = '0';
+        document.getElementById('avgPerHour').textContent = '0';
     }
 }
 
@@ -307,9 +341,9 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Auto refresh every 30 seconds
+    // Reduce auto refresh frequency to avoid overwhelming server
     setInterval(() => {
         loadData();
         loadStatistics();
-    }, 30000);
+    }, 60000); // Changed from 30s to 60s
 });
